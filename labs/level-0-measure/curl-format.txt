@@ -1,0 +1,7 @@
+      DNS lookup:  %{time_namelookup}s\n
+     TCP connect:  %{time_connect}s\n
+   TLS handshake:  %{time_appconnect}s\n
+ Request sent at:  %{time_pretransfer}s\n
+Time to 1st byte:  %{time_starttransfer}s\n
+           Total:  %{time_total}s\n
+          Status:  %{http_code}\n

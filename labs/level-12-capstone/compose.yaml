@@ -1,0 +1,78 @@
+# Level 12 capstone: a URL shortener.
+#   gateway (nginx) -> app x2 (FastAPI) -> Postgres (links, clicks)
+#                                       -> Redis (cache + "clicks" stream) -> worker -> Postgres
+# Only the gateway is published, on 127.0.0.1. Load tests and scripts run on the Compose network.
+services:
+  gateway:
+    image: nginx:1.27-alpine
+    volumes:
+      - ./gateway/nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "127.0.0.1:${APP_PORT:-8090}:80"
+    depends_on:
+      app: { condition: service_healthy }
+
+  app:
+    build: ./app
+    deploy:
+      replicas: 2
+    environment:
+      DATABASE_URL: postgresql://short:short@db:5432/short
+      REDIS_URL: redis://redis:6379/0
+      BASE_URL: http://localhost:${APP_PORT:-8090}
+      CODE_LEN: ${CODE_LEN:-7}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/internal/health', timeout=2)"]
+      interval: 3s
+      retries: 20
+    depends_on:
+      db: { condition: service_healthy }
+      redis: { condition: service_started }
+
+  worker:
+    build: ./app
+    command: ["python", "worker.py"]
+    environment:
+      DATABASE_URL: postgresql://short:short@db:5432/short
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      db: { condition: service_healthy }
+      redis: { condition: service_started }
+
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: short
+      POSTGRES_PASSWORD: short
+      POSTGRES_DB: short
+    volumes:
+      - ./db:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U short -d short"]
+      interval: 3s
+      retries: 40
+
+  redis:
+    image: redis:7.4-alpine
+    # The stream must survive a restart (append-only file), and only keys with a TTL (the cache)
+    # may be evicted when memory is full: allkeys-lru could evict the clicks stream itself.
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec",
+              "--maxmemory", "64mb", "--maxmemory-policy", "volatile-lru"]
+
+  tools:
+    build: ./tools
+    profiles: ["tools"]
+    working_dir: /scripts
+    volumes: ["./scripts:/scripts:ro"]
+    environment:
+      APP: http://app:8000
+      GATEWAY: http://gateway
+      DATABASE_URL: postgresql://short:short@db:5432/short
+
+  k6:
+    image: grafana/k6:2.3.0
+    profiles: ["tools"]
+    volumes: ["./k6:/k6:ro"]
+    environment:
+      GATEWAY: http://gateway
+      APP: http://app:8000

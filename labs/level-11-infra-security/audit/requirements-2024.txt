@@ -1,0 +1,9 @@
+# The Python pins this course's labs started with (versions from late 2024; the labs now use current ones).
+# Part D scans them as if they were an old project's requirements file.
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+psycopg[binary]==3.2.3
+psycopg-pool==3.2.4
+redis==5.2.1
+httpx==0.28.1
+confluent-kafka==2.6.1

@@ -1,0 +1,42 @@
+# Level 3: a product catalogue with a slow database, Redis as a cache, and nginx as a tiny CDN.
+# Only nginx (the "edge") publishes a port.
+services:
+  edge:
+    image: nginx:1.27-alpine
+    ports: ["${EDGE_PORT:-8080}:80"]
+    volumes:
+      - ./nginx/edge.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on: [api]
+    restart: unless-stopped
+
+  api:
+    build: ./app
+    environment:
+      DATABASE_URL: postgresql://shop:shop@db:5432/shop
+      REDIS_URL: redis://redis:6379/0
+      CACHE_TTL: ${CACHE_TTL:-60}
+      STAMPEDE_PROTECTION: ${STAMPEDE_PROTECTION:-none}   # none | lock
+    depends_on:
+      db: { condition: service_healthy }
+      redis: { condition: service_started }
+    restart: unless-stopped
+
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: shop
+      POSTGRES_PASSWORD: shop
+      POSTGRES_DB: shop
+    volumes:
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U shop -d shop"]
+      interval: 3s
+      retries: 20
+    restart: unless-stopped
+
+  redis:
+    image: redis:7.4-alpine
+    # Bounded at 8 MB, evicting least-recently-used keys when full (step 6). Persistence off: it is a cache.
+    command: ["redis-server", "--maxmemory", "8mb", "--maxmemory-policy", "allkeys-lru", "--save", "", "--appendonly", "no"]
+    restart: unless-stopped

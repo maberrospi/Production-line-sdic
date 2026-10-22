@@ -1,0 +1,1 @@
+# Intentionally empty: replaces the nginx image's default server so only app.conf is active.

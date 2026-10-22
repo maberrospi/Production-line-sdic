@@ -1,0 +1,35 @@
+# Part C: Keycloak (identity provider) issues tokens; orders-api (resource server) verifies them.
+# Only Keycloak's web page is published, on 127.0.0.1, for the optional browser login in step C1.
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.8.1
+    command: ["start-dev", "--import-realm"]     # dev mode: in-memory-ish H2 database, HTTP allowed
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      KC_HEALTH_ENABLED: "true"
+    volumes:
+      - ./keycloak/lab-realm.json:/opt/keycloak/data/import/lab-realm.json:ro
+    ports:
+      - "127.0.0.1:${KC_PORT:-8180}:8080"
+    healthcheck:
+      # The image has no curl, so plain bash talks HTTP to the management port (9000) via /dev/tcp.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && while read -r line <&3; do [[ $$line == *UP* ]] && exit 0; done; exit 1"]
+      interval: 5s
+      retries: 40
+
+  api:
+    build: ./api
+    environment:
+      OIDC_ISSUER: http://keycloak:8080/realms/lab
+      OIDC_AUDIENCE: orders-api
+    depends_on:
+      keycloak: { condition: service_healthy }
+
+  tools:
+    build: ./tools
+    profiles: ["tools"]
+    working_dir: /scripts
+    volumes: ["./scripts:/scripts:ro"]
+    environment:
+      OIDC_ISSUER: http://keycloak:8080/realms/lab

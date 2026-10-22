@@ -1,0 +1,74 @@
+# Level 10: checkout calls payments through Toxiproxy (so you can break the network on command).
+# Prometheus scrapes metrics and evaluates SLO alerts; Jaeger collects traces.
+# Only the Prometheus and Jaeger web pages are published, on 127.0.0.1. Scripts run in `tools`.
+x-otel: &otel
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+  OTEL_TRACES_SAMPLER: always_on
+
+services:
+  checkout-v1:
+    build: ./checkout
+    environment:
+      <<: *otel
+      VERSION: v1
+      OTEL_SERVICE_NAME: checkout
+      OTEL_RESOURCE_ATTRIBUTES: service.version=v1
+      PAYMENTS_URL: http://toxiproxy:9000
+    depends_on: [toxiproxy, jaeger]
+
+  checkout-v2:                       # the new release, only started for the canary step
+    build: ./checkout
+    profiles: ["canary"]
+    environment:
+      <<: *otel
+      VERSION: v2
+      OTEL_SERVICE_NAME: checkout
+      OTEL_RESOURCE_ATTRIBUTES: service.version=v2
+      PAYMENTS_URL: http://toxiproxy:9000
+    depends_on: [toxiproxy, jaeger]
+
+  gateway:                           # nginx splitting traffic between v1 and v2
+    image: nginx:1.27-alpine
+    profiles: ["canary"]
+    environment:
+      CANARY_PERCENT: ${CANARY_PERCENT:-10}     # 1-99 (nginx's split_clients does not accept 0)
+      CANARY: ${CANARY:-on}                     # off = all traffic to v1
+    volumes:
+      - ./gateway/default.conf.template:/etc/nginx/templates/default.conf.template:ro
+    depends_on: [checkout-v1, checkout-v2]
+
+  payments:
+    build: ./payments
+    environment:
+      <<: *otel
+      OTEL_SERVICE_NAME: payments
+      OTEL_RESOURCE_ATTRIBUTES: service.version=v1
+    depends_on: [jaeger]
+
+  toxiproxy:                         # a TCP proxy that adds latency or breaks connections on command
+    image: ghcr.io/shopify/toxiproxy:2.12.0
+    command: ["-host=0.0.0.0", "-config=/config/toxiproxy.json"]
+    volumes:
+      - ./toxiproxy/toxiproxy.json:/config/toxiproxy.json:ro
+    depends_on: [payments]
+
+  prometheus:
+    image: prom/prometheus:v3.15.0
+    volumes:
+      - ./prometheus:/etc/prometheus:ro
+    ports:
+      - "127.0.0.1:${PROM_PORT:-9090}:9090"
+
+  jaeger:                            # all-in-one: receives OTLP on 4318, keeps traces in memory, UI on 16686
+    image: jaegertracing/jaeger:2.22.0
+    ports:
+      - "127.0.0.1:${JAEGER_PORT:-16686}:16686"
+
+  tools:
+    build: ./tools
+    profiles: ["tools"]
+    working_dir: /scripts
+    volumes: ["./scripts:/scripts:ro"]
+    environment:
+      CHECKOUT: http://checkout-v1:8000
+      PAYMENTS_DIRECT: http://payments:8000

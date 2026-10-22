@@ -1,0 +1,77 @@
+{
+  "realm": "lab",
+  "enabled": true,
+  "accessTokenLifespan": 300,
+  "roles": {
+    "realm": [
+      { "name": "orders.read", "description": "May list orders" },
+      { "name": "orders.write", "description": "May create orders" }
+    ]
+  },
+  "users": [
+    {
+      "username": "alice",
+      "enabled": true,
+      "email": "alice@example.com",
+      "emailVerified": true,
+      "firstName": "Alice",
+      "lastName": "Lab",
+      "credentials": [{ "type": "password", "value": "alice-pass", "temporary": false }],
+      "realmRoles": ["default-roles-lab", "orders.read", "orders.write"]
+    },
+    {
+      "username": "bob",
+      "enabled": true,
+      "email": "bob@example.com",
+      "emailVerified": true,
+      "firstName": "Bob",
+      "lastName": "Lab",
+      "credentials": [{ "type": "password", "value": "bob-pass", "temporary": false }],
+      "realmRoles": ["default-roles-lab", "orders.read"]
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "lab-web",
+      "name": "The web app users log in to",
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "redirectUris": ["http://localhost:9999/callback"],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "access.token.lifespan": "60"
+      },
+      "protocolMappers": [
+        {
+          "name": "audience: orders-api",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.client.audience": "orders-api",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "orders-api",
+      "name": "The API (a resource server: it only receives tokens)",
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false
+    },
+    {
+      "clientId": "reports-job",
+      "name": "A batch job that calls other services as itself",
+      "publicClient": false,
+      "secret": "reports-job-secret",
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+# State can contain secrets (see step B5) and belongs in a locked remote backend, never in git.
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log

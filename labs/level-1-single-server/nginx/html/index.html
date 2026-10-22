@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Notes</title>
+  <style>
+    body { font: 16px/1.5 system-ui, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 16px; }
+    li { padding: 6px 0; border-bottom: 1px solid #ddd; }
+    small { color: #777; }
+    form { display: flex; gap: 8px; margin: 16px 0; }
+    input { flex: 1; padding: 8px; }
+  </style>
+</head>
+<body>
+  <h1>Notes</h1>
+  <p><small id="version">checking API…</small></p>
+  <form id="f"><input id="body" placeholder="Write a note" required maxlength="500"><button>Add</button></form>
+  <ul id="notes"></ul>
+  <script>
+    async function load() {
+      const h = await fetch("/api/health").then(r => r.json()).catch(() => null);
+      document.getElementById("version").textContent = h ? `API ${h.status}, version ${h.version}` : "API unreachable";
+      const notes = await fetch("/api/notes").then(r => r.json()).catch(() => []);
+      const ul = document.getElementById("notes");
+      ul.innerHTML = "";
+      for (const n of notes) {
+        const li = document.createElement("li");
+        li.textContent = n.body + " ";
+        const s = document.createElement("small");
+        s.textContent = new Date(n.created_at).toLocaleString();
+        li.appendChild(s);
+        ul.appendChild(li);
+      }
+    }
+    document.getElementById("f").addEventListener("submit", async e => {
+      e.preventDefault();
+      const input = document.getElementById("body");
+      const r = await fetch("/api/notes", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ body: input.value }) });
+      if (r.status === 429) alert("Slow down: rate limited by nginx");
+      input.value = "";
+      load();
+    });
+    load();
+  </script>
+</body>
+</html>

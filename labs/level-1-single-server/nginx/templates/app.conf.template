@@ -1,0 +1,76 @@
+# Rendered by the nginx image at start: ${DOMAIN} is replaced from the environment,
+# nginx's own variables ($host, $uri...) are left alone because they are not env vars.
+
+upstream api {
+    server api:8000;
+    keepalive 16;
+}
+
+# Only POSTs get a key, and requests with an empty key are never limited,
+# so this zone rate-limits writes per client IP and leaves reads alone.
+map $request_method $write_limit_key {
+    POST    $binary_remote_addr;
+    default "";
+}
+limit_req_zone $write_limit_key zone=writes:10m rate=30r/m;
+
+server {
+    listen 80;
+    server_name ${DOMAIN};
+
+    # Let's Encrypt HTTP-01 challenges (certbot --webroot)
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        return 301 https://$host:${HTTPS_PORT}$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name ${DOMAIN};
+
+    ssl_certificate     /etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}/privkey.pem;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+
+    add_header Strict-Transport-Security "max-age=31536000" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+    client_max_body_size 2m;
+    root /usr/share/nginx/html;
+
+    gzip on;
+    gzip_types text/css application/javascript application/json;
+
+    # Never serve dotfiles (.env, .git ...)
+    location ~ /\. {
+        return 404;
+    }
+
+    location /assets/ {
+        add_header Cache-Control "public, max-age=31536000, immutable";
+    }
+
+    # Writes are rate limited per client IP
+    location = /api/notes {
+        limit_req zone=writes burst=10 nodelay;
+        limit_req_status 429;
+        proxy_pass http://api;
+        include /etc/nginx/conf.d/proxy_params.inc;
+    }
+
+    location /api/ {
+        proxy_pass http://api;
+        include /etc/nginx/conf.d/proxy_params.inc;
+    }
+
+    # Single-page app fallback
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}

@@ -1,0 +1,29 @@
+# The canary router. The nginx image fills in ${CANARY_PERCENT} and ${CANARY} from the environment
+# when the container starts (envsubst on /etc/nginx/templates), writing /etc/nginx/conf.d/default.conf.
+
+# Pick a bucket per request. split_clients hashes the key; a real canary would hash a user or
+# session ID instead, so each user consistently sees one version.
+split_clients "$request_id" $bucket {
+    ${CANARY_PERCENT}%  canary;
+    *                   stable;
+}
+
+# CANARY=off sends everything to v1: rolling back is a config change, not a redeploy.
+map "${CANARY}:$bucket" $checkout_upstream {
+    "on:canary"  checkout_v2;
+    default      checkout_v1;
+}
+
+upstream checkout_v1 { server checkout-v1:8000; keepalive 32; }
+upstream checkout_v2 { server checkout-v2:8000; keepalive 32; }
+
+server {
+    listen 80 default_server;
+
+    location / {
+        proxy_pass http://$checkout_upstream;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_read_timeout 60s;
+    }
+}

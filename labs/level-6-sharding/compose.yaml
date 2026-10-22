@@ -1,0 +1,31 @@
+# Level 6: four independent Postgres servers act as shards (shard3 starts with profile "grow").
+# They know nothing about each other: the router in scripts/router.py decides where each row lives.
+# No ports are published; scripts run in the tools container on the same network.
+x-shard: &shard
+  image: postgres:16
+  environment:
+    POSTGRES_PASSWORD: postgres
+    POSTGRES_DB: app
+  volumes:
+    - ./sql/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
+  healthcheck:
+    test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d app"]
+    interval: 2s
+    retries: 30
+
+services:
+  shard0: *shard
+  shard1: *shard
+  shard2: *shard
+  shard3:
+    <<: *shard
+    profiles: ["grow"]
+
+  tools:
+    build: ./tools
+    profiles: ["tools"]
+    working_dir: /scripts
+    volumes:
+      - ./scripts:/scripts:ro
+    environment:
+      SHARD_DSN: postgresql://postgres:postgres@shard{n}:5432/app

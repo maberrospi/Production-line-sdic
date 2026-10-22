@@ -1,0 +1,31 @@
+# Level 0 lab: a measurement playground.
+# NOTE: this lab publishes port 8000 directly so k6 and curl can reach the API.
+# That is fine on your laptop. In Level 1 you will learn why production must not do this.
+services:
+  api:
+    build: ./app
+    # API_PORT picks the port on YOUR machine (left side). Inside Docker the app always listens on 8000.
+    ports: ["${API_PORT:-8000}:8000"]
+    environment:
+      DATABASE_URL: postgresql://lab:lab@db:5432/lab
+      WORKERS: ${WORKERS:-1}
+    cpus: ${API_CPUS:-4}
+    depends_on:
+      db: { condition: service_healthy }
+    restart: unless-stopped
+
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: lab
+      POSTGRES_PASSWORD: lab
+      POSTGRES_DB: lab
+    volumes: [labdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U lab -d lab"]
+      interval: 3s
+      retries: 20
+    restart: unless-stopped
+
+volumes:
+  labdata: {}

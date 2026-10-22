@@ -1,0 +1,48 @@
+# Level 9: an nginx API gateway in front of two FastAPI services, Redis for rate limits, and
+# Postgres with 1,000,000 orders. No ports are published: scripts run in the tools container and
+# call http://gateway like an outside client.
+services:
+  gateway:
+    image: nginx:1.27-alpine
+    volumes:
+      - ./gateway/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on: [users, orders]
+
+  users:
+    build: ./users
+
+  orders:
+    build: ./orders
+    environment:
+      DATABASE_URL: postgresql://lab:lab@db:5432/lab
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      db: { condition: service_healthy }
+      redis: { condition: service_started }
+
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: lab
+      POSTGRES_PASSWORD: lab
+      POSTGRES_DB: lab
+    volumes:
+      - ./sql:/docker-entrypoint-initdb.d:ro     # seeds 1,000,000 orders on the first start
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U lab -d lab"]
+      interval: 3s
+      retries: 40
+
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+
+  tools:
+    build: ./tools
+    profiles: ["tools"]
+    working_dir: /scripts
+    volumes: ["./scripts:/scripts:ro"]
+    environment:
+      GATEWAY: http://gateway
+      ORDERS: http://orders:8000
+      DATABASE_URL: postgresql://lab:lab@db:5432/lab

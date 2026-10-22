@@ -1,0 +1,78 @@
+# Level 8: a Postgres job queue (part A), a single Kafka broker (part B), an orders service that
+# publishes events by dual write or through an outbox read by Debezium (part C), and an idempotent
+# consumer with a dead-letter topic (part D). No ports are published.
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: shop
+    # Debezium reads the write-ahead log through logical decoding (Level 5's WAL, decoded into rows)
+    command: ["postgres", "-c", "wal_level=logical", "-c", "max_replication_slots=4", "-c", "max_wal_senders=4"]
+    volumes:
+      - ./sql:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d shop"]
+      interval: 2s
+      retries: 30
+
+  # One Kafka broker in KRaft mode (no ZooKeeper since Kafka 4.0): broker and controller in one process.
+  kafka:
+    image: apache/kafka:4.3.1
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1"]
+      interval: 5s
+      timeout: 10s
+      retries: 20
+
+  # Kafka Connect with the Debezium connectors (step 7)
+  connect:
+    image: quay.io/debezium/connect:3.6.3.Final
+    environment:
+      BOOTSTRAP_SERVERS: kafka:9092
+      GROUP_ID: connect
+      CONFIG_STORAGE_TOPIC: connect_configs
+      OFFSET_STORAGE_TOPIC: connect_offsets
+      STATUS_STORAGE_TOPIC: connect_statuses
+      CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: 1
+      OFFSET_FLUSH_INTERVAL_MS: 5000        # how often Connect records which events it has published
+    depends_on:
+      kafka: { condition: service_healthy }
+      db: { condition: service_healthy }
+
+  orders:
+    build: ./orders
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/shop
+      KAFKA_BOOTSTRAP: kafka:9092
+      CRASH_RATE: "0.1"       # 10% of requests "die" right after their database commit
+    depends_on:
+      db: { condition: service_healthy }
+      kafka: { condition: service_healthy }
+
+  tools:
+    build: ./tools
+    profiles: ["tools"]
+    working_dir: /scripts
+    volumes:
+      - ./scripts:/scripts:ro
+      - ./connect:/connect:ro
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/shop
+      KAFKA_BOOTSTRAP: kafka:9092
+      ORDERS_URL: http://orders:8000
+      CONNECT_URL: http://connect:8083

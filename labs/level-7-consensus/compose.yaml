@@ -1,0 +1,100 @@
+# Level 7: a three-member etcd cluster (Raft), and a payments API that shows why idempotency keys exist.
+# No ports are published. ./etcdctl.sh talks to the whole cluster; ./member.sh etcdN talks to one member.
+x-etcd: &etcd
+  image: quay.io/coreos/etcd:v3.5.21
+  healthcheck:
+    # Commits a tiny proposal through Raft: passes only while this member is part of a working majority.
+    test: ["CMD", "/usr/local/bin/etcdctl", "--endpoints=127.0.0.1:2379", "endpoint", "health"]
+    interval: 5s
+    timeout: 4s
+    retries: 3
+  restart: "no"
+  stop_grace_period: 10s
+
+services:
+  etcd1:
+    <<: *etcd
+    command:
+      - /usr/local/bin/etcd
+      - --name=etcd1
+      - --data-dir=/etcd-data
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --advertise-client-urls=http://etcd1:2379
+      - --listen-peer-urls=http://0.0.0.0:2380
+      - --initial-advertise-peer-urls=http://etcd1:2380
+      - --initial-cluster=etcd1=http://etcd1:2380,etcd2=http://etcd2:2380,etcd3=http://etcd3:2380
+      - --initial-cluster-state=new
+      - --initial-cluster-token=lab7
+    volumes: [etcd1-data:/etcd-data]
+  etcd2:
+    <<: *etcd
+    command:
+      - /usr/local/bin/etcd
+      - --name=etcd2
+      - --data-dir=/etcd-data
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --advertise-client-urls=http://etcd2:2379
+      - --listen-peer-urls=http://0.0.0.0:2380
+      - --initial-advertise-peer-urls=http://etcd2:2380
+      - --initial-cluster=etcd1=http://etcd1:2380,etcd2=http://etcd2:2380,etcd3=http://etcd3:2380
+      - --initial-cluster-state=new
+      - --initial-cluster-token=lab7
+    volumes: [etcd2-data:/etcd-data]
+  etcd3:
+    <<: *etcd
+    command:
+      - /usr/local/bin/etcd
+      - --name=etcd3
+      - --data-dir=/etcd-data
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --advertise-client-urls=http://etcd3:2379
+      - --listen-peer-urls=http://0.0.0.0:2380
+      - --initial-advertise-peer-urls=http://etcd3:2380
+      - --initial-cluster=etcd1=http://etcd1:2380,etcd2=http://etcd2:2380,etcd3=http://etcd3:2380
+      - --initial-cluster-state=new
+      - --initial-cluster-token=lab7
+    volumes: [etcd3-data:/etcd-data]
+
+  # etcdctl pointed at all three members. Used through ./etcdctl.sh
+  cli:
+    image: quay.io/coreos/etcd:v3.5.21
+    profiles: ["tools"]
+    entrypoint: ["/usr/local/bin/etcdctl"]
+    environment:
+      ETCDCTL_API: "3"
+      ETCDCTL_ENDPOINTS: etcd1:2379,etcd2:2379,etcd3:2379
+
+  # Part two: a payments API whose responses are sometimes "lost" (step 7)
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: pay
+      POSTGRES_PASSWORD: pay
+      POSTGRES_DB: pay
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U pay -d pay"]
+      interval: 2s
+      retries: 30
+  payments:
+    build: ./payments
+    environment:
+      DATABASE_URL: postgresql://pay:pay@db:5432/pay
+      LOSS_RATE: "0.2"
+    depends_on:
+      db: { condition: service_healthy }
+  tools:
+    build: ./tools
+    profiles: ["tools"]
+    working_dir: /scripts
+    volumes: ["./scripts:/scripts:ro"]
+    environment:
+      PAYMENTS_URL: http://payments:8000
+
+networks:
+  default:
+    name: lab7          # a fixed name, so "docker network disconnect lab7 ..." works in step 4
+
+volumes:
+  etcd1-data: {}
+  etcd2-data: {}
+  etcd3-data: {}

@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Secrets and local settings. The .env.example files are lab templates and stay in the repo.
+.env
+.env.*
+!.env.example
+
+# OpenTofu / Terraform: provider binaries, state (state stores variables in plain text, secrets included)
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+
+# Lab run output
+labs/**/backups/
+labs/**/offsite/
+*.dump
+
+# Archives and OS clutter
+*.zip
+.DS_Store
+Thumbs.db
+Zone.Identifier
+*:Zone.Identifier

@@ -1,0 +1,45 @@
+# Level 2: three interchangeable API replicas behind HAProxy.
+# Only HAProxy publishes ports: LB_PORT for traffic, STATS_PORT for its dashboard.
+services:
+  haproxy:
+    image: haproxy:3.0-alpine
+    ports:
+      - "${LB_PORT:-8080}:8080"
+      - "${STATS_PORT:-8404}:8404"
+    environment:
+      BALANCE: ${BALANCE:-roundrobin}        # roundrobin | leastconn | random
+    volumes:
+      - ./haproxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    depends_on: [api]
+    restart: unless-stopped
+
+  api:
+    build: ./api
+    deploy:
+      replicas: 3                            # Docker DNS answers "api" with every replica's IP
+    environment:
+      SESSION_STORE: ${SESSION_STORE:-memory}  # memory | redis
+      REDIS_URL: redis://redis:6379/0
+    depends_on: [redis]
+    restart: unless-stopped
+    # no ports: only HAProxy talks to the replicas
+
+  # A fourth replica that answers every request 150 ms late (step 6).
+  # It joins the same DNS name "api", so HAProxy discovers it without config changes.
+  api-slow:
+    build: ./api
+    profiles: ["slow"]
+    environment:
+      SESSION_STORE: ${SESSION_STORE:-memory}
+      REDIS_URL: redis://redis:6379/0
+      EXTRA_DELAY_MS: "150"
+    networks:
+      default:
+        aliases: [api]
+    depends_on: [redis]
+
+  redis:
+    image: redis:7.4-alpine
+    # Persistence off on purpose: restarting Redis empties it (step 4 shows what that means).
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    restart: unless-stopped

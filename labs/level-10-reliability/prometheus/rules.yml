@@ -1,0 +1,40 @@
+# SLO: 99.9% of checkouts succeed (are not 5xx). Error budget: 0.1%.
+#
+# Multiwindow, multi-burn-rate alerts from Google's SRE Workbook, chapter 5 ("Alerting on SLOs"):
+#   page if burn rate > 14.4 over 1 h AND over 5 min   (2% of a 30-day budget gone in 1 hour)
+#   page if burn rate >  6   over 6 h AND over 30 min  (5% of the budget gone in 6 hours)
+# The short window (1/12 of the long one) makes the alert stop soon after the problem does.
+#
+# LAB SCALING: the windows are 10x shorter so you can watch alerts fire and clear in minutes:
+#   1 h -> 6 m, 5 m -> 30 s, 6 h -> 36 m, 30 m -> 3 m.
+# In production use the real windows, or you will be paged for every blip.
+groups:
+  - name: checkout-slo
+    rules:
+      - record: checkout:error_ratio:rate30s
+        expr: sum(rate(checkout_requests_total{code=~"5.."}[30s])) / sum(rate(checkout_requests_total[30s]))
+      - record: checkout:error_ratio:rate3m
+        expr: sum(rate(checkout_requests_total{code=~"5.."}[3m])) / sum(rate(checkout_requests_total[3m]))
+      - record: checkout:error_ratio:rate6m
+        expr: sum(rate(checkout_requests_total{code=~"5.."}[6m])) / sum(rate(checkout_requests_total[6m]))
+      - record: checkout:error_ratio:rate36m
+        expr: sum(rate(checkout_requests_total{code=~"5.."}[36m])) / sum(rate(checkout_requests_total[36m]))
+      # Burn rate = error ratio / error budget. 1 means the budget lasts exactly the 30 days.
+      - record: checkout:burn_rate:6m
+        expr: checkout:error_ratio:rate6m / 0.001
+      - record: checkout:burn_rate:30s
+        expr: checkout:error_ratio:rate30s / 0.001
+
+      - alert: CheckoutErrorBudgetFastBurn
+        expr: checkout:error_ratio:rate6m > (14.4 * 0.001) and checkout:error_ratio:rate30s > (14.4 * 0.001)
+        labels:
+          severity: page
+        annotations:
+          summary: "{{ $value | humanizePercentage }} of checkouts failing over the last 6m: burn rate above 14.4"
+          description: "Burn rate above 14.4: at this pace 2% of the monthly budget goes every (lab-scaled) hour."
+      - alert: CheckoutErrorBudgetSlowBurn
+        expr: checkout:error_ratio:rate36m > (6 * 0.001) and checkout:error_ratio:rate3m > (6 * 0.001)
+        labels:
+          severity: page
+        annotations:
+          summary: "{{ $value | humanizePercentage }} of checkouts failing over the last 36m: burn rate above 6"

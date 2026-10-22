@@ -1,0 +1,6 @@
+.env
+certs/
+certbot-www/
+backups/
+offsite/
+.deploy/
