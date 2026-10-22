@@ -5,6 +5,8 @@ server through scaling out, caching, databases, replication, sharding, consensus
 reliability, infrastructure and security, ending with design case studies. Every level has
 interactive lessons, a checkpoint quiz, an exam and a lab you run yourself.
 
+![Production Line course map](imgs/ProductionLineHomepage.png)
+
 ## Open the course
 
 - **Locally:** open `course/index.html` in a browser, or serve it:
