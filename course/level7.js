@@ -100,7 +100,7 @@
     function verdict() {
       const v = p.querySelector("#cp-v");
       if (!cut()) { v.className = "callout"; v.textContent = "No partition: every replica gets every write. CAP only forces a choice while the network is partitioned."; return; }
-      if (mode === "cp") { v.className = "callout good"; v.textContent = "Consistency over availability: the side without a majority stops serving writes (and linearizable reads). Nobody ever sees conflicting balances. etcd, ZooKeeper and Postgres with synchronous replication behave like this."; }
+      if (mode === "cp") { v.className = "callout good"; v.textContent = "Consistency over availability: the side without a majority stops serving writes (and linearizable reads). Nobody ever sees conflicting balances. etcd and ZooKeeper behave like this. Postgres gets there only when failover is decided by consensus with fencing (for example Patroni with <code>synchronous_mode_strict</code>); synchronous replication on its own is not consensus, and a promotion without fencing can still split the brain (Level 5)."; }
       else { v.className = "callout warn"; v.textContent = "Availability over consistency: every side keeps working, and the replicas diverge. When the partition heals, conflicts must be reconciled (here, two withdrawals might overdraw the account). Dynamo-style stores such as Cassandra lean this way, and many apps accept it for data like shopping carts."; }
     }
     seg(p.querySelector("#cp-m"), [["cp", "Consistency (CP)"], ["ap", "Availability (AP)"]], mode, v => { mode = v; reset(); });
